@@ -114,7 +114,7 @@ For main process changes, restart the app.
 
 ## Building
 
-### Create Installers
+### Quick Build
 
 Build for your current platform:
 
@@ -125,24 +125,26 @@ npm run build
 Or specify a platform:
 
 ```bash
-npm run dist:mac     # macOS DMG
-npm run dist:win     # Windows NSIS installer
+npm run dist:mac     # macOS DMG installer
+npm run dist:win     # Windows EXE installer
 ```
 
 ### Output
 
 Installers are generated in the `dist/` directory:
 
-- **macOS**: `YouTube Downloader-x.x.x.dmg` and `YouTube Downloader-x.x.x.zip`
+- **macOS**: `YouTube Downloader-x.x.x-arm64.dmg` (installer) and `YouTube Downloader-x.x.x-arm64-mac.zip` (portable)
 - **Windows**: `YouTube Downloader Setup x.x.x.exe`
 
-### Build Configuration
+### Detailed Build Instructions
 
-Edit `package.json` under the `"build"` section to customize:
+For comprehensive build instructions including:
+- System prerequisites and setup
+- Step-by-step build process
+- Signing and distribution
+- Troubleshooting
 
-- App name and icon
-- Installer behavior
-- Target platforms and architectures
+📖 **See [BUILD.md](BUILD.md) for complete build guide**
 
 ## Usage Guide
 
