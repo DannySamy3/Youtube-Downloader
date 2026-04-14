@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YouTube Downloader</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header class="header">
+        <h1>🎬 YouTube Downloader</h1>
+        <p class="subtitle">Download YouTube videos and audio with ease</p>
+      </header>
+
+      <main class="main-content">
+        <!-- Input Section -->
+        <section class="input-section">
+          <div class="input-group">
+            <label for="urlInput">YouTube URL:</label>
+            <div class="input-wrapper">
+              <input
+                type="text"
+                id="urlInput"
+                placeholder="Paste YouTube URL here..."
+                class="url-input"
+              />
+              <button id="loadBtn" class="btn btn-primary">Load Video</button>
+            </div>
+            <div id="urlError" class="error-message"></div>
+          </div>
+        </section>
+
+        <!-- Video Preview Section -->
+        <section
+          id="previewSection"
+          class="preview-section"
+          style="display: none"
+        >
+          <div class="preview-container">
+            <div class="thumbnail-container">
+              <img
+                id="thumbnail"
+                src=""
+                alt="Video thumbnail"
+                class="thumbnail"
+              />
+            </div>
+            <div class="video-info">
+              <h2 id="videoTitle" class="video-title"></h2>
+              <p id="videoDuration" class="video-duration"></p>
+              <p id="videoDescription" class="video-description"></p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Format Selection Section -->
+        <section
+          id="formatSection"
+          class="format-section"
+          style="display: none"
+        >
+          <div class="section-title">Select Format & Quality</div>
+
+          <div class="format-options">
+            <div class="format-group">
+              <h3>Video Format</h3>
+              <div class="button-group">
+                <button
+                  class="format-btn"
+                  data-format="mp4"
+                  data-quality="1080"
+                >
+                  1080p
+                </button>
+                <button class="format-btn" data-format="mp4" data-quality="720">
+                  720p
+                </button>
+                <button class="format-btn" data-format="mp4" data-quality="480">
+                  480p
+                </button>
+                <button class="format-btn" data-format="mp4" data-quality="360">
+                  360p
+                </button>
+              </div>
+            </div>
+
+            <div class="format-group">
+              <h3>Audio Format</h3>
+              <div class="button-group">
+                <button
+                  class="format-btn"
+                  data-format="mp3"
+                  data-quality="audio"
+                >
+                  MP3
+                </button>
+                <button
+                  class="format-btn"
+                  data-format="m4a"
+                  data-quality="audio"
+                >
+                  M4A
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="selected-format">
+            Selected: <span id="selectedFormatText">None</span>
+          </div>
+        </section>
+
+        <!-- Download Section -->
+        <section
+          id="downloadSection"
+          class="download-section"
+          style="display: none"
+        >
+          <button id="downloadBtn" class="btn btn-success">📥 Download</button>
+        </section>
+
+        <!-- Progress Section -->
+        <section
+          id="progressSection"
+          class="progress-section"
+          style="display: none"
+        >
+          <div class="progress-container">
+            <div class="progress-header">
+              <span id="downloadStatus">Downloading...</span>
+              <span id="downloadPercent">0%</span>
+            </div>
+            <div class="progress-bar">
+              <div id="progressFill" class="progress-fill"></div>
+            </div>
+            <div class="progress-details">
+              <span id="downloadSpeed">Speed: 0 MB/s</span>
+              <span id="downloadETA">Time remaining: calculating...</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- Message Section -->
+        <section
+          id="messageSection"
+          class="message-section"
+          style="display: none"
+        >
+          <div id="messageBox" class="message-box"></div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <p>
+          © 2024 YouTube Downloader. Download responsibly and respect copyright.
+        </p>
+      </footer>
+    </div>
+
+    <script src="renderer.js"></script>
+  </body>
+</html>
