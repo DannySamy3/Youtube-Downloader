@@ -2,10 +2,27 @@ const fs = require("fs");
 const path = require("path");
 const { spawn } = require("child_process");
 const ffmpeg = require("fluent-ffmpeg");
-const ffmpegStatic = require("ffmpeg-static");
+
+// Find and set ffmpeg path - use system ffmpeg from Homebrew
+function getFFmpegPath() {
+  const possiblePaths = [
+    '/usr/local/bin/ffmpeg',      // Intel Mac
+    '/opt/homebrew/bin/ffmpeg',   // Apple Silicon
+  ];
+  
+  for (const ffmpegPath of possiblePaths) {
+    if (fs.existsSync(ffmpegPath)) {
+      return ffmpegPath;
+    }
+  }
+  
+  // Fallback - try system PATH
+  return 'ffmpeg';
+}
 
 // Set ffmpeg path
-ffmpeg.setFfmpegPath(ffmpegStatic);
+const ffmpegPath = getFFmpegPath();
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 // Find yt-dlp binary - works in both dev and packaged app
 function getYtdlpPath() {
@@ -138,7 +155,7 @@ async function downloadVideo({ url, format, quality, outputPath, onProgress }) {
 }
 
 /**
- * Download video as MP4
+ * Download video as MP4 - SIMPLIFIED
  */
 async function downloadVideoMP4(url, quality, outputPath, onProgress) {
   return new Promise((resolve, reject) => {
@@ -166,7 +183,7 @@ async function downloadVideoMP4(url, quality, outputPath, onProgress) {
         });
       }
 
-      // Format: prefer single file with both streams, no merging needed
+      // Format: prefer single file with both streams
       const format = `best[height<=${selectedQuality}]`;
       const args = [
         '-f', format,
@@ -180,24 +197,22 @@ async function downloadVideoMP4(url, quality, outputPath, onProgress) {
         env: { ...process.env, PATH: `/usr/local/bin:/opt/homebrew/bin:${process.env.PATH}` }
       });
       let lastProgress = 0;
+      let hasCalledResolve = false;
 
       const handleOutput = (data) => {
         const output = data.toString();
         
-        // Only match progress lines that have "[download]" prefix to avoid false matches
         if (!output.includes('[download]')) {
           return;
         }
 
-        // Parse: [download] 23.5% of ~234.56MiB at 1.23MiB/s ETA 00:45
-        const progressMatch = output.match(/\[download\]\s+(\d+(?:\.\d+)?)%/);
+        const progressMatch = output.match(/\[download\]\s+([\d.]+)%/);
         const speedMatch = output.match(/at\s+([\d.]+\s*[KMG]iB\/s)/);
         const etaMatch = output.match(/ETA\s+(\d{1,2}:\d{2}(?::\d{2})?)/);
 
         if (progressMatch) {
           const percent = parseFloat(progressMatch[1]);
           
-          // Only update if progress is valid and moves forward (don't go past 99% during download)
           if (percent > 0 && percent < 100 && percent >= lastProgress) {
             const speed = speedMatch ? speedMatch[1].trim() : 'calculating...';
             const eta = etaMatch ? etaMatch[1] : 'calculating...';
@@ -219,25 +234,20 @@ async function downloadVideoMP4(url, quality, outputPath, onProgress) {
       child.stderr.on('data', handleOutput);
 
       child.on('close', (code) => {
+        if (hasCalledResolve) return;
+        
         if (code !== 0) {
+          hasCalledResolve = true;
           reject(new Error(`Download failed with exit code ${code}`));
           return;
         }
 
-        // Now that download is complete, report 100%
-        if (onProgress) {
-          onProgress({
-            status: 'Download complete!',
-            percent: 100,
-            speed: '0 B/s',
-            eta: 'Done'
-          });
-        }
-
-        // Give file system a moment to settle
+        // Wait for file to be written
         setTimeout(() => {
-          // Check if output file exists at exact path
+          if (hasCalledResolve) return;
+          
           if (fs.existsSync(outputPath)) {
+            hasCalledResolve = true;
             if (onProgress) {
               onProgress({
                 status: 'Download complete!',
@@ -248,59 +258,20 @@ async function downloadVideoMP4(url, quality, outputPath, onProgress) {
             }
             resolve({
               path: outputPath,
-              message: 'Video downloaded successfully with audio'
+              message: 'Video downloaded successfully'
             });
-            return;
+          } else {
+            hasCalledResolve = true;
+            reject(new Error(`File not created at ${outputPath}`));
           }
-
-          // If not found at exact path, search directory for video files
-          const dir = path.dirname(outputPath);
-          
-          try {
-            const files = fs.readdirSync(dir);
-            // Find video files, skip .part files and format code files (like 00.f140)
-            const videoFiles = files.filter(f => 
-              (f.endsWith('.mp4') || f.endsWith('.mkv') || f.endsWith('.webm') || f.endsWith('.m4a')) && 
-              !f.includes('temp_') && 
-              !f.startsWith('.') &&
-              !f.includes('.part') && // Skip incomplete downloads
-              !f.match(/^\d+\.f\d+/) && // Skip format-code files like 00.f398
-              f.includes(path.basename(outputPath).split('.')[0]) // Only files matching the output name
-            ).sort();
-
-            if (videoFiles.length > 0) {
-              // Single file found - use it
-              const foundPath = path.join(dir, videoFiles[0]);
-              
-              fs.rename(foundPath, outputPath, (err) => {
-                if (err) {
-                  reject(new Error(`Could not rename file: ${err.message}`));
-                } else {
-                  if (onProgress) {
-                    onProgress({
-                      status: 'Download complete!',
-                      percent: 100,
-                      speed: '0 B/s',
-                      eta: '0s'
-                    });
-                  }
-                  resolve({
-                    path: outputPath,
-                    message: 'Video downloaded successfully'
-                  });
-                }
-              });
-            } else {
-              reject(new Error('Video file was not created after download'));
-            }
-          } catch (err) {
-            reject(new Error(`Failed to find video file: ${err.message}`));
-          }
-        }, 500); // Wait 500ms for file system
+        }, 2000); // Wait 2 seconds for file
       });
 
       child.on('error', (error) => {
-        reject(new Error(`Failed to start download: ${error.message}`));
+        if (!hasCalledResolve) {
+          hasCalledResolve = true;
+          reject(new Error(`Failed to start download: ${error.message}`));
+        }
       });
 
     } catch (error) {
@@ -310,28 +281,29 @@ async function downloadVideoMP4(url, quality, outputPath, onProgress) {
 }
 
 /**
- * Download audio and convert to MP3/M4A
+ * Download audio and convert to MP3/M4A - SIMPLIFIED
  */
 async function downloadAudio(url, format, outputPath, onProgress) {
   return new Promise((resolve, reject) => {
     try {
-      const tempDir = path.dirname(outputPath);
-      const tempFile = path.join(tempDir, 'temp_audio.m4a');
-      const outputTemplate = tempFile.replace(/\.m4a$/, '');
+      const dir = path.dirname(outputPath);
       const ytdlpPath = getYtdlpPath();
 
       if (onProgress) {
         onProgress({
-          status: 'Starting audio download...',
+          status: 'Downloading audio...',
           percent: 0,
           speed: 0,
           eta: null
         });
       }
 
+      // Use a simple temp output path that won't conflict
+      const tempAudioPath = path.join(dir, 'yt_audio_temp.m4b');
+
       const args = [
         '-f', 'bestaudio',
-        '-o', outputTemplate,
+        '-o', tempAudioPath,
         '--progress-template', '[download] %(progress._percent_str)s at %(progress._speed_str)s ETA %(progress._eta_str)s',
         '--no-warnings',
         url
@@ -341,31 +313,30 @@ async function downloadAudio(url, format, outputPath, onProgress) {
         env: { ...process.env, PATH: `/usr/local/bin:/opt/homebrew/bin:${process.env.PATH}` }
       });
       let lastProgress = 0;
+      let hasResolved = false;
 
       const handleOutput = (data) => {
         const output = data.toString();
         
-        // Only match progress lines that have "[download]" prefix
         if (!output.includes('[download]')) {
           return;
         }
 
-        const progressMatch = output.match(/\[download\]\s+(\d+(?:\.\d+)?)%/);
+        const progressMatch = output.match(/\[download\]\s+([\d.]+)%/);
         const speedMatch = output.match(/at\s+([\d.]+\s*[KMG]iB\/s)/);
         const etaMatch = output.match(/ETA\s+(\d{1,2}:\d{2}(?::\d{2})?)/);
 
         if (progressMatch) {
           const percent = parseFloat(progressMatch[1]);
           
-          // Only update if progress is valid and moves forward (0-90% for audio download)
           if (percent > 0 && percent < 100 && percent >= lastProgress) {
-            const speed = speedMatch ? speedMatch[1].trim() : 'calculating...';
+            const speed = speedMatch ? speedMatch[1] : 'calculating...';
             const eta = etaMatch ? etaMatch[1] : 'calculating...';
 
             if (onProgress) {
               onProgress({
                 status: 'Downloading audio...',
-                percent: Math.min(90, percent * 0.9),
+                percent: Math.min(80, percent * 0.8),
                 speed: speed,
                 eta: eta
               });
@@ -379,126 +350,129 @@ async function downloadAudio(url, format, outputPath, onProgress) {
       child.stderr.on('data', handleOutput);
 
       child.on('close', (code) => {
+        if (hasResolved) return;
+        
         if (code !== 0) {
+          hasResolved = true;
           reject(new Error(`Audio download failed with exit code ${code}`));
           return;
         }
 
-        // Report initial completion (90% - audio download done)
-        if (onProgress) {
-          onProgress({
-            status: 'Audio download complete, formatting...',
-            percent: 90,
-            speed: 0,
-            eta: null
-          });
-        }
-
-        // Give file system a moment to settle
+        // Audio download is done, now convert (if needed)
         setTimeout(() => {
-          // Search for any audio file created in the directory
-          const dir = path.dirname(tempFile);
-          
-          try {
-            const files = fs.readdirSync(dir);
-            // Find any audio files (not just recent ones)
-            const audioFiles = files.filter(f => 
-              (f.endsWith('.m4a') || f.endsWith('.webm') || f.endsWith('.mp3') || 
-               f.endsWith('.aac') || f.endsWith('.opus')) && 
-              !f.includes('temp_') && 
-              !f.startsWith('.')
-            );
+          if (hasResolved) return;
 
-            if (audioFiles.length === 0) {
-              reject(new Error('Audio file was not created'));
-              return;
-            }
+          if (!fs.existsSync(tempAudioPath)) {
+            hasResolved = true;
+            reject(new Error('Audio file was not created'));
+            return;
+          }
 
-            // Use the first audio file (or largest if multiple)
-            const selectedFile = audioFiles.length === 1
-              ? audioFiles[0]
-              : audioFiles.reduce((prev, current) => {
-                  const prevSize = fs.statSync(path.join(dir, prev)).size;
-                  const currSize = fs.statSync(path.join(dir, current)).size;
-                  return currSize > prevSize ? current : prev;
-                });
-
-            const downloadedPath = path.join(dir, selectedFile);
-
-            if (format === 'mp3') {
-              if (onProgress) {
-                onProgress({
-                  status: 'Converting to MP3...',
-                  percent: 50,
-                  speed: 0,
-                  eta: null
-                });
-              }
-
-              ffmpeg(downloadedPath)
-                .toFormat('mp3')
-                .audioCodec('libmp3lame')
-                .audioBitrate('192k')
-                .on('progress', (progress) => {
-                  if (onProgress) {
-                    onProgress({
-                      status: 'Converting to MP3...',
-                      percent: 50 + ((progress.percent || 0) / 2),
-                      speed: 0,
-                      eta: null
-                    });
-                  }
-                })
-                .on('end', () => {
-                  fs.unlink(downloadedPath, () => {});
-                  if (onProgress) {
-                    onProgress({
-                      status: 'Conversion complete!',
-                      percent: 100,
-                      speed: 0,
-                      eta: 0
-                    });
-                  }
-                  resolve({
-                    path: outputPath,
-                    message: 'Audio converted to MP3 successfully'
-                  });
-                })
-                .on('error', (err) => {
-                  fs.unlink(downloadedPath, () => {});
-                  fs.unlink(outputPath, () => {});
-                  reject(new Error(`Conversion error: ${err.message}`));
-                })
-                .save(outputPath);
-            } else {
-              fs.rename(downloadedPath, outputPath, (err) => {
-                if (err) {
-                  fs.unlink(downloadedPath, () => {});
-                  reject(new Error(`File save error: ${err.message}`));
-                } else {
-                  if (onProgress) {
-                    onProgress({
-                      status: 'Download complete!',
-                      percent: 100,
-                      speed: 0,
-                      eta: 0
-                    });
-                  }
-                  resolve({
-                    path: outputPath,
-                    message: 'Audio downloaded successfully'
-                  });
-                }
+          if (format === 'mp3') {
+            // Convert to MP3
+            if (onProgress) {
+              onProgress({
+                status: 'Converting to MP3...',
+                percent: 85,
+                speed: 0,
+                eta: null
               });
             }
-          } catch (err) {
-            reject(new Error(`Failed to find audio file: ${err.message}`));
+
+            ffmpeg(tempAudioPath)
+              .audioCodec('libmp3lame')
+              .audioBitrate('192k')
+              .toFormat('mp3')
+              .on('progress', (progress) => {
+                const convPercent = 85 + ((progress.percent || 0) * 0.14);
+                if (onProgress && !hasResolved) {
+                  onProgress({
+                    status: 'Converting to MP3...',
+                    percent: Math.min(99, convPercent),
+                    speed: 0,
+                    eta: null
+                  });
+                }
+              })
+              .on('end', () => {
+                if (hasResolved) return;
+                hasResolved = true;
+                
+                try {
+                  fs.unlinkSync(tempAudioPath);
+                } catch (e) {}
+
+                if (onProgress) {
+                  onProgress({
+                    status: 'Download complete!',
+                    percent: 100,
+                    speed: 0,
+                    eta: 0
+                  });
+                }
+                resolve({
+                  path: outputPath,
+                  message: 'Audio converted to MP3 successfully'
+                });
+              })
+              .on('error', (err) => {
+                if (hasResolved) return;
+                hasResolved = true;
+                
+                try {
+                  fs.unlinkSync(tempAudioPath);
+                  fs.unlinkSync(outputPath);
+                } catch (e) {}
+                
+                reject(new Error(`MP3 conversion failed: ${err.message}`));
+              })
+              .save(outputPath);
+
+          } else if (format === 'm4a') {
+            // Rename for M4A
+            if (onProgress) {
+              onProgress({
+                status: 'Finalizing...',
+                percent: 95,
+                speed: 0,
+                eta: null
+              });
+            }
+
+            fs.rename(tempAudioPath, outputPath, (err) => {
+              if (hasResolved) return;
+              hasResolved = true;
+              
+              if (err) {
+                try {
+                  fs.unlinkSync(tempAudioPath);
+                } catch (e) {}
+                reject(new Error(`Failed to save M4A: ${err.message}`));
+                return;
+              }
+
+              if (onProgress) {
+                onProgress({
+                  status: 'Download complete!',
+                  percent: 100,
+                  speed: 0,
+                  eta: 0
+                });
+              }
+              resolve({
+                path: outputPath,
+                message: 'Audio saved as M4A successfully'
+              });
+            });
           }
-        }, 500); // Wait 500ms for file system
+        }, 1500); // Wait 1.5 seconds for file
       });
 
       child.on('error', (error) => {
-        reject(new Error(`Failed to start audio download: ${error.message}`));
+        if (!hasResolved) {
+          hasResolved = true;
+          reject(new Error(`Failed to start download: ${error.message}`));
+        }
       });
 
     } catch (error) {
